@@ -49,6 +49,12 @@ func (ph *PlanHandler) GetPlan(c *gin.Context) {
 		return
 	}
 
+	clientETag = strings.TrimSpace(c.GetHeader("If-Match"))
+	if clientETag != "" && clientETag != currentETag {
+		c.Status(http.StatusPreconditionFailed)
+		return
+	}
+
 	c.Header("ETag", currentETag)
 
 	c.JSON(http.StatusOK, plan)
