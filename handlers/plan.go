@@ -31,10 +31,10 @@ func (ph *PlanHandler) GetPlan(c *gin.Context) {
 		return
 	}
 
-	plan, err := ph.service.GetPlan(c, objectId)
+	plan, err := ph.service.GetAnyObject(c, objectId)
 	if err != nil {
 		log.Printf("Failed to fetch plan with err : %v", err.Error())
-		if err.Error() == "key not found" {
+		if err.Error() == "KEY_NOT_FOUND" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Plan not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -44,7 +44,7 @@ func (ph *PlanHandler) GetPlan(c *gin.Context) {
 
 	currentETag := generateETag(plan)
 	clientETag := strings.TrimSpace(c.GetHeader("If-None-Match"))
-	if clientETag == currentETag {
+	if clientETag != "" && clientETag == currentETag {
 		c.Status(http.StatusNotModified)
 		return
 	}
@@ -56,7 +56,6 @@ func (ph *PlanHandler) GetPlan(c *gin.Context) {
 	}
 
 	c.Header("ETag", currentETag)
-
 	c.JSON(http.StatusOK, plan)
 }
 
@@ -83,7 +82,6 @@ func (ph *PlanHandler) CreatePlan(c *gin.Context) {
 
 	eTag := generateETag(planRequest)
 	c.Header("ETag", eTag)
-
 	c.JSON(http.StatusCreated, gin.H{"message": "Plan created successfully"})
 }
 
@@ -94,9 +92,10 @@ func (ph *PlanHandler) DeletePlan(c *gin.Context) {
 		return
 	}
 
-	if err := ph.service.DeletePlan(c, objectId); err != nil {
+	existingPlan, err := ph.service.GetPlan(c, objectId)
+	if err != nil {
 		log.Printf("Failed to delete plan with err : %v", err.Error())
-		if err.Error() == "key not found" {
+		if err.Error() == "KEY_NOT_FOUND" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Plan not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -104,7 +103,124 @@ func (ph *PlanHandler) DeletePlan(c *gin.Context) {
 		return
 	}
 
+	existingETag := generateETag(existingPlan)
+	clientETag := strings.TrimSpace(c.GetHeader("If-Match"))
+	if clientETag != "" && clientETag != existingETag {
+		c.Status(http.StatusPreconditionFailed)
+		return
+	}
+
+	if err := ph.service.DeletePlan(c, objectId); err != nil {
+		log.Printf("Failed to delete plan with err : %v", err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
 	c.Status(http.StatusNoContent)
+}
+
+func (ph *PlanHandler) UpdatePlan(c *gin.Context) {
+	var planRequest models.Plan
+
+	if err := c.ShouldBindBodyWith(&planRequest, binding.JSON); err != nil {
+		log.Printf("Bad request with error : %v", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing or invalid fields in the request"})
+		return
+	}
+
+	existingPlan, err := ph.service.GetPlan(c, planRequest.ObjectId)
+	if err != nil || existingPlan.ObjectId == "" {
+		// If the plan does not exist, create a new one
+		if err := ph.service.CreatePlan(c, planRequest); err != nil {
+			log.Printf("Failed to create plan with error : %v", err.Error())
+
+			eTag := generateETag(planRequest)
+			c.Header("ETag", eTag)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create plan"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{"message": "Plan created successfully"})
+		return
+	}
+
+	currentETag := generateETag(planRequest)
+	existingETag := generateETag(existingPlan)
+
+	clientETag := strings.TrimSpace(c.GetHeader("If-None-Match"))
+	if clientETag != "" && clientETag == currentETag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
+	clientETag = strings.TrimSpace(c.GetHeader("If-Match"))
+	if clientETag != "" && clientETag != existingETag {
+		c.Status(http.StatusPreconditionFailed)
+		return
+	}
+
+	err = ph.service.UpdatePlan(c, planRequest.ObjectId, planRequest)
+	if err != nil {
+		log.Printf("Failed to update plan with error : %v", err.Error())
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	eTag := generateETag(planRequest)
+	c.Header("ETag", eTag)
+	c.JSON(http.StatusOK, gin.H{"message": "Plan updated successfully"})
+}
+
+func (ph *PlanHandler) PatchPlan(c *gin.Context) {
+	objectId, found := c.Params.Get("objectId")
+	if !found {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "objectId is required"})
+		return
+	}
+
+	var planRequest models.Plan
+	if err := c.ShouldBindBodyWith(&planRequest, binding.JSON); err != nil {
+		log.Printf("Bad request with error : %v", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing or invalid fields in the request"})
+		return
+	}
+
+	existingPlan, err := ph.service.GetPlan(c, objectId)
+	if err != nil || existingPlan.ObjectId == "" {
+		log.Printf("Failed to fetch plan with err : %v", err.Error())
+		if err.Error() == "KEY_NOT_FOUND" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Plan not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		}
+		return
+	}
+
+	currentETag := generateETag(planRequest)
+	existingETag := generateETag(existingPlan)
+
+	clientETag := strings.TrimSpace(c.GetHeader("If-None-Match"))
+	if clientETag != "" && clientETag == currentETag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
+	clientETag = strings.TrimSpace(c.GetHeader("If-Match"))
+	if clientETag != "" && clientETag != existingETag {
+		c.Status(http.StatusPreconditionFailed)
+		return
+	}
+
+	patchedPlan, err := ph.service.PatchPlan(c, objectId, planRequest)
+	if err != nil {
+		log.Printf("Failed to update plan with error : %v", err.Error())
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	eTag := generateETag(patchedPlan)
+	c.Header("ETag", eTag)
+	c.JSON(http.StatusOK, gin.H{"message": "Plan updated successfully"})
 }
 
 func (ph *PlanHandler) GetAllPlans(c *gin.Context) {

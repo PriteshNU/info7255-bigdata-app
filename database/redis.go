@@ -28,7 +28,7 @@ func (r *RedisRepository) Ping(ctx *gin.Context) error {
 func (r *RedisRepository) Get(ctx *gin.Context, key string) (string, error) {
 	val, err := r.client.Get(ctx, key).Result()
 	if err == redis.Nil {
-		return "", errors.New("key not found")
+		return "", errors.New("KEY_NOT_FOUND")
 	}
 	return val, err
 }
@@ -41,7 +41,7 @@ func (r *RedisRepository) Set(ctx *gin.Context, key, value string) error {
 func (r *RedisRepository) Delete(ctx *gin.Context, key string) error {
 	res, err := r.client.Del(ctx, key).Result()
 	if res == 0 {
-		return errors.New("key not found")
+		return errors.New("KEY_NOT_FOUND")
 	}
 	return err
 }

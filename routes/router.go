@@ -3,6 +3,7 @@ package routes
 import (
 	"info7255-bigdata-app/database"
 	"info7255-bigdata-app/handlers"
+	"info7255-bigdata-app/middleware"
 	"info7255-bigdata-app/services"
 
 	"github.com/gin-contrib/cors"
@@ -18,11 +19,13 @@ func SetupRouter() *gin.Engine {
 	planService := services.NewPlanService(redisRepo)
 	planHandler := handlers.NewPlanHandler(planService)
 
-	v1 := router.Group("/v1")
+	v1 := router.Group("/v1", middleware.OAuth2Middleware())
 	{
 		v1.POST("/plan", planHandler.CreatePlan)
 		v1.GET("/plan/:objectId", planHandler.GetPlan)
 		v1.DELETE("/plan/:objectId", planHandler.DeletePlan)
+		v1.PATCH("/plan/:objectId", planHandler.PatchPlan)
+		v1.PUT("/plan", planHandler.UpdatePlan)
 		v1.GET("/plans", planHandler.GetAllPlans)
 	}
 
