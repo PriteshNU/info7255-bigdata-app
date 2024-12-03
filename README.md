@@ -1,7 +1,5 @@
 # INFO 7255 Big Data Indexing
 
----
-
 ## Overview
 This project implements a RESTful API for managing and indexing structured JSON objects. It supports CRUD operations, JSON schema validation, and caching with ETag headers. Indexed data is searchable through Elasticsearch and visualized using Kibana.
 
