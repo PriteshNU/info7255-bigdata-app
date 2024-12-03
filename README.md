@@ -1,5 +1,4 @@
 # INFO 7255 Big Data Indexing
-A project demonstrating indexing of structured JSON objects with caching, validation, and search capabilities.
 
 ---
 
