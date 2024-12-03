@@ -2,7 +2,9 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"info7255-bigdata-app/models"
+	"info7255-bigdata-app/rabbitmq"
 	"info7255-bigdata-app/repositories"
 
 	log "github.com/sirupsen/logrus"
@@ -48,7 +50,6 @@ func (ps *planService) GetPlan(ctx *gin.Context, key string) (models.Plan, error
 }
 
 func (ps *planService) CreatePlan(c *gin.Context, plan models.Plan) error {
-	// Add Code to marshal the struct into a string and set it in the redis
 	objectId := plan.ObjectId
 
 	// Marshal the struct into a string
@@ -113,6 +114,19 @@ func (ps *planService) CreatePlan(c *gin.Context, plan models.Plan) error {
 		}
 	}
 
+	// Publish the plan creation message to RabbitMQ
+	message := models.PlanMessage{
+		Operation: "create",
+		Plan:      plan,
+	}
+
+	rmq := &rabbitmq.Factory{}
+	err = rmq.PublishMessage("plans_queue", message)
+	if err != nil {
+		log.Errorf("Error publishing create message to RabbitMQ: %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -162,6 +176,19 @@ func (ps *planService) DeletePlan(c *gin.Context, objectId string) error {
 		}
 	}
 
+	// Publish the plan deletion message to RabbitMQ
+	message := models.PlanMessage{
+		Operation: "delete",
+		Plan:      plan,
+	}
+
+	rmq := &rabbitmq.Factory{}
+	err = rmq.PublishMessage("plans_queue", message)
+	if err != nil {
+		log.Errorf("Error publishing delete message to RabbitMQ: %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -174,6 +201,11 @@ func (ps *planService) PatchPlan(ctx *gin.Context, key string, plan models.Plan)
 	if plan.PlanCostShares != nil {
 		var pValue []byte
 		if existingPlan.PlanCostShares != nil {
+			if existingPlan.PlanCostShares.ObjectId != plan.PlanCostShares.ObjectId {
+				validationErr := errors.New("ObjectId mismatch in planCostShares")
+				log.Errorf("Error updating planCostShares : %v", validationErr)
+				return models.Plan{}, validationErr
+			}
 			existingPlan.PlanCostShares.UpdatePlanCostShares(*plan.PlanCostShares)
 			pValue, err = json.Marshal(existingPlan.PlanCostShares)
 			if err != nil {
@@ -257,8 +289,12 @@ func (ps *planService) PatchPlan(ctx *gin.Context, key string, plan models.Plan)
 	existingPlan.Org = plan.Org
 	existingPlan.PlanStatus = plan.PlanStatus
 	existingPlan.CreationDate = plan.CreationDate
-	existingPlan.ObjectType = plan.ObjectType
-	existingPlan.ObjectId = plan.ObjectId
+
+	if plan.ObjectId != "" && existingPlan.ObjectId != plan.ObjectId {
+		validationErr := errors.New("ObjectId mismatch in plan")
+		log.Errorf("Error updating plan : %v", validationErr)
+		return models.Plan{}, validationErr
+	}
 
 	value, err := json.Marshal(existingPlan)
 	if err != nil {
@@ -269,6 +305,19 @@ func (ps *planService) PatchPlan(ctx *gin.Context, key string, plan models.Plan)
 	err = ps.repo.Set(ctx, key, string(value))
 	if err != nil {
 		log.Printf("Error saving plan to redis: %v", err)
+		return models.Plan{}, err
+	}
+
+	// Publish the plan patch message to RabbitMQ
+	message := models.PlanMessage{
+		Operation: "patch",
+		Plan:      plan,
+	}
+
+	rmq := &rabbitmq.Factory{}
+	err = rmq.PublishMessage("plans_queue", message)
+	if err != nil {
+		log.Errorf("Error publishing patch message to RabbitMQ: %v", err)
 		return models.Plan{}, err
 	}
 

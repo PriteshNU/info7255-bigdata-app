@@ -1,26 +1,33 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"info7255-bigdata-app/elastic"
 	"info7255-bigdata-app/models"
 	"info7255-bigdata-app/services"
 	"log"
 	"net/http"
 	"strings"
 
+	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 )
 
 type PlanHandler struct {
-	service services.PlanService
+	service   services.PlanService
+	esFactory *elastic.Factory
 }
 
-func NewPlanHandler(service services.PlanService) *PlanHandler {
+func NewPlanHandler(service services.PlanService, esFactory *elastic.Factory) *PlanHandler {
 	return &PlanHandler{
-		service: service,
+		service:   service,
+		esFactory: esFactory,
 	}
 }
 
@@ -214,7 +221,11 @@ func (ph *PlanHandler) PatchPlan(c *gin.Context) {
 	patchedPlan, err := ph.service.PatchPlan(c, objectId, planRequest)
 	if err != nil {
 		log.Printf("Failed to update plan with error : %v", err.Error())
-		c.AbortWithStatus(http.StatusInternalServerError)
+		if strings.HasPrefix(err.Error(), "ObjectId mismatch") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.AbortWithStatus(http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -232,6 +243,67 @@ func (ph *PlanHandler) GetAllPlans(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, plans)
+}
+
+func (ph *PlanHandler) SearchPlans(c *gin.Context) {
+	var req models.SearchPlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create a match query
+	matchQuery := map[string]interface{}{
+		"query": map[string]interface{}{
+			"match": map[string]interface{}{
+				req.Key: req.Value,
+			},
+		},
+	}
+	queryBytes, err := json.Marshal(matchQuery)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create a new search request
+	searchReq := esapi.SearchRequest{
+		Index: []string{"plans"},
+		Body:  bytes.NewReader(queryBytes),
+	}
+
+	// Create a new Elasticsearch client
+	cfg := elasticsearch.Config{
+		Addresses: []string{
+			"http://localhost:9200",
+		},
+	}
+	client, err := ph.esFactory.NewClient(cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Perform the search request.
+	res, err := searchReq.Do(context.Background(), client.ES)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": res.String()})
+		return
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 func generateETag(plan interface{}) string {

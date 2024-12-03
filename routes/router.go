@@ -2,6 +2,7 @@ package routes
 
 import (
 	"info7255-bigdata-app/database"
+	"info7255-bigdata-app/elastic"
 	"info7255-bigdata-app/handlers"
 	"info7255-bigdata-app/middleware"
 	"info7255-bigdata-app/services"
@@ -17,7 +18,8 @@ func SetupRouter() *gin.Engine {
 
 	redisRepo := database.NewRedisRepository("localhost:6379")
 	planService := services.NewPlanService(redisRepo)
-	planHandler := handlers.NewPlanHandler(planService)
+	esFactory := elastic.NewElasticFactory()
+	planHandler := handlers.NewPlanHandler(planService, esFactory)
 
 	v1 := router.Group("/v1", middleware.OAuth2Middleware())
 	{
@@ -27,6 +29,7 @@ func SetupRouter() *gin.Engine {
 		v1.PATCH("/plan/:objectId", planHandler.PatchPlan)
 		v1.PUT("/plan", planHandler.UpdatePlan)
 		v1.GET("/plans", planHandler.GetAllPlans)
+		v1.POST("/search", planHandler.SearchPlans)
 	}
 
 	return router
